@@ -1,0 +1,494 @@
+﻿@model List<ChatBoard.Models.ChatUserViewModel>
+@{
+    ViewBag.Title = "Chat Dashboard";
+    var senderIdValue = Context.Session.GetInt32("UserId") ?? 0;
+}
+<link href="~/css/chatboard.css" rel="stylesheet" />
+<script src="~/lib/signalr/signalr.min.js"></script>
+<div class="container-fluid vh-100-minus-header-footer px-3">
+    <div class="row h-100 g-0">
+        <!-- Left: User List -->
+        <div class="col-md-3 bg-light border-end d-flex flex-column p-3">
+            <div class="position-relative">
+                <div class="d-flex mb-2 align-items-center">
+                    <input type="text" id="searchUser" class="form-control me-2" placeholder="Search user..." />
+                    <button id="createGroupBtn" class="btn btn-primary" title="Create Group"
+                            style="width:40px; height:40px; border-radius:50%; display:flex; align-items:center; justify-content:center;">
+                        <span style="font-size:20px;">👥</span>
+                    </button>
+                </div>
+                <div id="dynamicUserList" class="dynamic-user-list"></div>
+            </div>
+            <div class="flex-grow-1 overflow-auto" id="userList">
+                @foreach (var user in Model)
+                {
+                    if (user.IsGroup)
+                    {
+                        <div class="user-item" data-groupid="@user.GroupId">
+                            <img src="@user.GroupImage" alt="Group" />
+                            <span>@user.GroupName</span>
+                        </div>
+                    }
+                    else
+                    {
+                        <div class="user-item" data-username="@user.DisplayName"
+                             data-empcode="@user.EmpCode"
+                             data-email="@user.Email"
+                             data-userid="@user.UserId">
+                            <img src="@user.ProfileImage" alt="User" />
+                            <span>@user.DisplayName (@user.EmpCode)</span>
+                        </div>
+                    }
+                }
+            </div>
+        </div>
+        <!-- Right: Chat Panel -->
+        <div class="col-md-9 d-flex flex-column p-0" id="chatPanel">
+            <div class="chat-header p-2 border-bottom">
+                <h5 class="mb-0"><span id="chatUser">Select a User</span></h5>
+            </div>
+            <div id="chatBox" class="flex-grow-1 d-flex flex-column overflow-auto p-2" style="background:#f5f5f5; position:relative;">
+                <div id="loadingSpinner" style="display:none; text-align:center; padding:10px;">
+                    <span>Loading...</span>
+                </div>
+                <p id="chatPlaceholder" class="text-muted text-center mt-2">Select a user to start chatting.</p>
+            </div>
+            <!-- Chat Input Area -->
+            <div id="chatInputContainer" class="chat-input-area d-none p-2 d-flex align-items-center border-top">
+                <div class="dropdown me-2">
+                    <button class="btn btn-light" type="button" id="addBtn" data-bs-toggle="dropdown" aria-expanded="false"
+                            style="border-radius:50%; width:40px; height:40px; display:flex; align-items:center; justify-content:center;">
+                        <span style="font-size:20px;">+</span>
+                    </button>
+                    <ul class="dropdown-menu" aria-labelledby="addBtn">
+                        <li><a class="dropdown-item" href="#" onclick="openFilePicker('document'); return false;">📄 Document</a></li>
+                        <li><a class="dropdown-item" href="#" onclick="openFilePicker('photo'); return false;">🖼️ Photo</a></li>
+                        <li><a class="dropdown-item" href="#" onclick="openFilePicker('video'); return false;">🎥 Video</a></li>
+                    </ul>
+                </div>
+                <input type="file" id="fileInput" style="display:none" onchange="handleFileUpload(event)" />
+                <input type="text" id="chatInput" class="form-control me-2" placeholder="Type your message..." />
+                <button id="sendBtn" class="btn btn-primary">Send</button>
+            </div>
+        </div>
+    </div>
+</div>
+<script>
+    const chatUser = document.getElementById("chatUser");
+    const chatBox = document.getElementById("chatBox");
+    const chatInputContainer = document.getElementById("chatInputContainer");
+    const dynamicUserList = document.getElementById("dynamicUserList");
+    const searchInput = document.getElementById("searchUser");
+    const loadingSpinner = document.getElementById("loadingSpinner");
+    const senderId = @senderIdValue;
+    let currentReceiverId = null;
+    let currentReceiverEmail = null;
+    let chatSkip = 0;
+    const chatTake = 20;
+    let allLoaded = false;
+    let chatMessages = [];
+        function createMessageHTML(msg) {
+        let content = '';
+        if (msg.messageType === 'file' && msg.filePath) {
+            const fileName = msg.filePath.split('/').pop(); // extract file name
+            const lowerPath = msg.filePath.toLowerCase();
+            if (lowerPath.match(/\.(jpeg|jpg|png|gif)$/i)) {
+                // 🖼️ Image preview
+                content = `<img src="${msg.filePath}" alt="${fileName}" style="max-width:200px; max-height:200px; border-radius:6px;" />`;
+            }
+            else if (lowerPath.match(/\.(mp4|webm|ogg)$/i)) {
+                // 🎥 Video player
+                content = `<video controls style="max-width:250px; max-height:200px; border-radius:6px;">
+                              <source src="${msg.filePath}" type="video/mp4">
+                              Your browser does not support the video tag.
+                           </video>`;
+            }
+            else {
+                // 📄 Any other file (document, zip, pdf, etc.)
+                content = `<a href="${msg.filePath}" target="_blank" download="${fileName}"
+                               style="color:#000; text-decoration:none;">
+                               📎 ${fileName}
+                           </a>`;
+            }
+        }
+        else {
+            // Regular text message
+            content = msg.text ? msg.text.replace(/\n/g, "<br>") : '';
+        }
+        return `
+        <div class="${msg.isSender ? "message-right" : "message-left"} col-12" data-msgid="${msg.chatId}">
+            <div class="message-bubble">
+                <strong>${msg.senderName}:</strong><br />${content}
+            </div>
+        </div>`;
+    }
+    function renderChat() {
+        chatMessages = chatMessages
+            .filter((v, i, a) => a.findIndex(t => t.chatId === v.chatId) === i)
+            .sort((a, b) => a.chatId - b.chatId);
+        chatBox.innerHTML = chatMessages.map(createMessageHTML).join("");
+        chatBox.scrollTop = chatBox.scrollHeight;
+    }
+        // --- Infinite Scroll for Chat History ---
+    chatBox.addEventListener("scroll", function () {
+        // 🧭 When user scrolls to top and not all messages are loaded
+        if (chatBox.scrollTop <= 50 && !allLoaded) {
+            loadOlderMessages();
+        }
+    });
+    function loadOlderMessages() {
+        loadingSpinner.style.display = "block";
+        const previousScrollHeight = chatBox.scrollHeight;
+        if (currentGroupId) {
+            // For group chat
+            fetch(`/Chat/GetGroupChatHistory?groupId=${currentGroupId}&skip=${chatSkip}&take=${chatTake}`)
+                .then(res => res.json())
+                .then(messages => handleOlderMessages(messages, previousScrollHeight));
+        } else if (currentReceiverEmail) {
+            // For one-to-one chat
+            fetch(`/Chat/GetChatHistoryPaged?username=${encodeURIComponent(currentReceiverEmail)}&skip=${chatSkip}&take=${chatTake}`)
+                .then(res => res.json())
+                .then(messages => handleOlderMessages(messages, previousScrollHeight));
+        }
+    }
+    function handleOlderMessages(messages, previousScrollHeight) {
+        messages = messages || [];
+        if (!Array.isArray(messages) || messages.length === 0) {
+            allLoaded = true;
+            loadingSpinner.style.display = "none";
+            return;
+        }
+        chatSkip += messages.length;
+        // Prepend (older messages come before existing ones)
+        chatMessages = [...messages, ...chatMessages];
+        renderChat();
+        // Maintain scroll position after prepend
+        chatBox.scrollTop = chatBox.scrollHeight - previousScrollHeight;
+        loadingSpinner.style.display = "none";
+        if (messages.length < chatTake) allLoaded = true;
+    }
+    function openChat(displayName, receiverId, receiverEmail, receiverEmpCode, groupId = null) {
+        chatUser.textContent = displayName;
+        chatInputContainer.classList.remove("d-none");
+        // Reset chat state
+        chatMessages = [];
+        chatSkip = 0;
+        allLoaded = false;
+        chatBox.innerHTML = '';
+        // ✅ Correctly set identifiers
+        currentGroupId = groupId || null;
+        currentReceiverId = groupId ? null : receiverId; // only for 1:1
+        currentReceiverEmail = groupId ? null : receiverEmpCode; // only for 1:1
+        // Load chat
+        if (currentGroupId) {
+            loadGroupChatHistory(currentGroupId);
+        } else if (currentReceiverEmail) {
+            loadChatHistory(receiverEmpCode);
+        }
+    }
+    function loadChatHistory(receiverEmpCode) {
+        loadingSpinner.style.display = 'block';
+        fetch(`/Chat/GetChatHistoryPaged?username=${receiverEmpCode}&skip=${chatSkip}&take=${chatTake}`)
+        .then(res => res.json())
+        .then(messages => {
+            messages = messages || [];
+            if (!Array.isArray(messages)) messages = [];
+            if (messages.length === 0) {
+                allLoaded = true;
+                loadingSpinner.style.display = 'none';
+                return;
+            }
+            const previousScrollHeight = chatBox.scrollHeight; // 📍 save before render
+            chatSkip += messages.length;
+            chatMessages = [...messages, ...chatMessages];
+            renderChat(); // 📍 re-render with new messages
+            // 📍 restore scroll position to avoid jump
+            chatBox.scrollTop = chatBox.scrollHeight - previousScrollHeight;
+            loadingSpinner.style.display = 'none';
+            if (messages.length < chatTake) allLoaded = true;
+        });
+    }
+    document.querySelectorAll("#userList .user-item").forEach(item => {
+        item.addEventListener("click", function () {
+            const displayName = this.querySelector("span").innerText;
+            const groupIdAttr = this.getAttribute("data-groupid");
+            const userIdAttr = this.getAttribute("data-userid");
+            if (groupIdAttr) {
+                // 🧩 This is a GROUP chat
+                const groupId = parseInt(groupIdAttr);
+                openChat(displayName, null, null, null, groupId);
+            }
+            else if (userIdAttr) {
+                // 👤 This is a 1-to-1 chat
+                const receiverId = parseInt(userIdAttr);
+                const receiverEmail = this.getAttribute("data-email");
+                const receiverEmpCode = this.getAttribute("data-empcode");
+                openChat(displayName, receiverId, receiverEmail, receiverEmpCode);
+            }
+        });
+    });
+    document.getElementById("sendBtn").addEventListener("click", function () {
+        const messageInput = document.getElementById("chatInput");
+        const message = messageInput.value.trim();
+        if (!message) return;
+        // Check if currentReceiverId is a group (we can store currentGroupId separately)
+        if (currentGroupId) {
+            // ✅ Group chat message
+            fetch('/Chat/SendGroupMessage', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+                body: JSON.stringify({ GroupId: currentGroupId, SenderId: senderId, MessageText: message })
+            })
+            .then(res => res.json())
+            .then(chat => {
+                chatMessages.push({
+                    chatId: chat.chatId,
+                    senderName: "You",
+                    text: chat.messageText,
+                    isSender: true
+                });
+                renderChat();
+                messageInput.value = '';
+            });
+        } else if (currentReceiverId) {
+            // ✅ One-to-one chat (existing SendMessage)
+            fetch('/Chat/SendMessage', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+                body: JSON.stringify({ SenderId: senderId, ReceiverId: currentReceiverId, Message: message })
+            })
+            .then(res => res.json())
+            .then(chat => {
+                chatMessages.push({ chatId: chat.chatId, senderName: "You", text: chat.message, isSender: true });
+                renderChat();
+                messageInput.value = '';
+            });
+        }
+    });
+    // --- SignalR Setup ---
+    const connection = new signalR.HubConnectionBuilder().withUrl("/chathub").build();
+    connection.start().then(() => console.log("SignalR connected")).catch(err => console.error(err.toString()));
+    connection.on("ReceiveMessage", (senderName, message, chatId, isSender = false, messageType = 'text') => {
+        if (!chatMessages.some(m => m.chatId === chatId)) {
+            chatMessages.push({
+                chatId,
+                senderName,
+                text: messageType === 'file' ? null : message,
+                isSender,
+                messageType,
+                filePath: messageType === 'file' ? message : null
+            });
+            renderChat();
+        }
+    });
+    searchInput.addEventListener("input", function(){
+        const query=this.value.toLowerCase().trim();
+        if(!query){ dynamicUserList.style.display="none"; return; }
+        fetch(`/Chat/GetUsersByName?query=${query}`)
+        .then(res=>res.json())
+        .then(users=>{
+            dynamicUserList.innerHTML="";
+            users.forEach(user=>{
+                const div=document.createElement("div");
+                div.className="user-item";
+                div.setAttribute("data-userid", user.userId);
+                div.setAttribute("data-email", user.email);
+                div.setAttribute("data-empcode", user.empCode);
+                div.innerHTML=`<img src="${user.profileImage}" /><span>${user.displayName} (${user.empCode})</span>`;
+                div.addEventListener("click", ()=>{
+                    openChat(user.displayName, parseInt(user.userId), user.email, user.empCode);
+                    dynamicUserList.style.display="none";
+                    searchInput.value="";
+                });
+                dynamicUserList.appendChild(div);
+            });
+            dynamicUserList.style.display = users.length?"block":"none";
+        });
+    });
+    // --- File Upload Handling ---
+    function openFilePicker(type) {
+        const fileInput = document.getElementById('fileInput');
+        if (type === 'photo') fileInput.accept = "image/*";
+        else if (type === 'video') fileInput.accept = "video/*";
+        else fileInput.accept = ".pdf,.doc,.docx,.xls,.xlsx,.txt,.zip,image/*,video/*"; // all docs
+        fileInput.value = '';
+        fileInput.click();
+    }
+    // function handleFileUpload(event) {
+    //     const file = event.target.files[0];
+    //     if (!file || !currentReceiverId) return;
+    //     // ✅ allow all images, videos, and documents (no blocking)
+    //     const formData = new FormData();
+    //     formData.append("file", file);
+    //     formData.append("senderId", senderId);
+    //     formData.append("receiverId", currentReceiverId);
+    //     fetch('/Chat/UploadFile', { method: 'POST', body: formData })
+    //     .then(res => res.json())
+    //     .then(chat => {
+    //         chatMessages.push({
+    //             chatId: chat.chatId,
+    //             senderName: "You",
+    //             isSender: true,
+    //             messageType: 'file',
+    //             filePath: chat.filePath
+    //         });
+    //         renderChat();
+    //         document.getElementById("fileInput").value = '';
+    //     });
+    // }
+        function handleFileUpload(event) {
+        const file = event.target.files[0];
+        if (!file) return;
+
+        const formData = new FormData();
+        formData.append("file", file);
+        formData.append("senderId", senderId);
+
+        let url = "";
+        if (currentGroupId) {
+            // ✅ Upload file for group
+            formData.append("groupId", currentGroupId);
+            url = "/Chat/UploadGroupFile";
+        } else if (currentReceiverId) {
+            // ✅ Upload file for 1:1 chat
+            formData.append("receiverId", currentReceiverId);
+            url = "/Chat/UploadFile";
+        } else return;
+
+        fetch(url, { method: "POST", body: formData })
+            .then(res => res.json())
+            .then(chat => {
+                chatMessages.push({
+                    chatId: chat.messageId || chat.chatId,
+                    senderName: "You",
+                    isSender: true,
+                    messageType: chat.messageType || "file",
+                    filePath: chat.filePath
+                });
+                renderChat();
+                document.getElementById("fileInput").value = '';
+            })
+            .catch(err => console.error("File upload error:", err));
+    }
+
+</script>
+<script>
+    document.getElementById("createGroupBtn").addEventListener("click", function () {
+        const modalHtml = `
+        <div class="modal fade" id="createGroupModal" tabindex="-1" aria-hidden="true">
+            <div class="modal-dialog modal-dialog-scrollable">
+            <div class="modal-content">
+                <div class="modal-header">
+                <h5 class="modal-title">Create Group Chat</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                <input type="text" id="groupName" class="form-control mb-3" placeholder="Group Name" />
+                <input type="text" id="searchGroupUser" class="form-control mb-2" placeholder="Search user..." />
+                <div id="groupUsersList" style="max-height:300px; overflow:auto; border:1px solid #ddd; padding:10px; border-radius:5px;">
+                    <div class="text-muted small">Loading users...</div>
+                </div>
+                </div>
+                <div class="modal-footer">
+                <button type="button" class="btn btn-primary" id="saveGroupBtn">Create Group</button>
+                </div>
+            </div>
+            </div>
+        </div>`;
+        document.body.insertAdjacentHTML('beforeend', modalHtml);
+        const modal = new bootstrap.Modal(document.getElementById('createGroupModal'));
+        modal.show();
+        let allUsers = [];
+        const selectedUserIdsSet = new Set(); // Track selected user IDs
+        // Load all users
+        fetch('/Chat/GetAllUsers')
+        .then(res => res.json())
+        .then(users => {
+            allUsers = users;
+            renderUserList(users);
+        });
+        function renderUserList(users) {
+            const userListDiv = document.getElementById('groupUsersList');
+            if (!users.length) {
+                userListDiv.innerHTML = `<div class="text-muted small">No users found.</div>`;
+                return;
+            }
+            userListDiv.innerHTML = users.map(user => {
+                const checked = selectedUserIdsSet.has(user.userId) ? 'checked' : '';
+                return `
+                    <div class="form-check mb-1">
+                        <input class="form-check-input" type="checkbox" value="${user.userId}" id="user_${user.userId}" ${checked}>
+                        <label class="form-check-label" for="user_${user.userId}">
+                            ${user.displayName} (${user.empCode})
+                        </label>
+                    </div>`;
+            }).join('');
+            // Update selection tracking when checkboxes are toggled
+            document.querySelectorAll('#groupUsersList input[type="checkbox"]').forEach(cb => {
+                cb.addEventListener('change', function () {
+                    const id = parseInt(this.value);
+                    if (this.checked) selectedUserIdsSet.add(id);
+                    else selectedUserIdsSet.delete(id);
+                });
+            });
+        }
+        // Filter users on search
+        document.getElementById("searchGroupUser").addEventListener("input", function (e) {
+            const query = e.target.value.toLowerCase().trim();
+            if (query === "") {
+                renderUserList(allUsers);
+            } else {
+                const filtered = allUsers.filter(u =>
+                    (u.displayName && u.displayName.toLowerCase().startsWith(query)) ||
+                    (u.empCode && u.empCode.toLowerCase().startsWith(query)) ||
+                    (u.email && u.email.toLowerCase().startsWith(query))
+                );
+                renderUserList(filtered);
+            }
+        });
+        // Create group
+        document.addEventListener("click", function (e) {
+            if (e.target && e.target.id === "saveGroupBtn") {
+                const groupName = document.getElementById('groupName').value.trim();
+                if (!groupName || selectedUserIdsSet.size === 0) {
+                    alert("⚠️ Please enter a group name and select at least one user.");
+                    return;
+                }
+                fetch('/Chat/CreateGroup', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ GroupName: groupName, MemberIds: Array.from(selectedUserIdsSet) })
+                })
+                .then(res => res.json())
+                .then(res => {
+                    alert("✅ Group created successfully!");
+                    modal.hide();
+                    document.getElementById('createGroupModal').remove();
+                    location.reload();
+                })
+                .catch(err => console.error(err));
+            }
+        });
+    });
+    function loadGroupChatHistory(groupId) {
+        loadingSpinner.style.display = 'block';
+        fetch(`/Chat/GetGroupChatHistory?groupId=${groupId}&skip=${chatSkip}&take=${chatTake}`)
+        .then(res => res.json())
+        .then(messages => {
+            messages = messages || [];
+            if (!Array.isArray(messages)) messages = [];
+            if (messages.length === 0) {
+                allLoaded = true;
+                loadingSpinner.style.display = 'none';
+                return;
+            }
+            const previousScrollHeight = chatBox.scrollHeight;
+            chatSkip += messages.length;
+            chatMessages = [...messages, ...chatMessages];
+            renderChat();
+            chatBox.scrollTop = chatBox.scrollHeight - previousScrollHeight;
+            loadingSpinner.style.display = 'none';
+            if (messages.length < chatTake) allLoaded = true;
+        });
+    }
+</script>

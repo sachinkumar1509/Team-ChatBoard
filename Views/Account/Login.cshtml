@@ -1,0 +1,45 @@
+﻿@{
+    ViewBag.Title = "Login - ChatBoard";
+}
+<div class="container vh-100 d-flex justify-content-center align-items-center">
+    <div class="card shadow-sm p-4" style="max-width: 400px; width: 100%;">
+        <div class="text-center mb-4">
+            <h3 class="fw-bold text-primary">ChatBoard Login</h3>
+        </div>
+        <form asp-action="Login" method="post">
+            <div class="mb-3">
+                <label for="empcode" class="form-label">Emp Code</label>
+                <input type="text" name="empcode" id="empcode" class="form-control" placeholder="Enter your Code" required />
+            </div>
+            <div class="mb-3">
+                <label for="username" class="form-label">Email</label>
+                <input type="text" name="username" id="username" class="form-control" placeholder="Enter your email" required />
+            </div>
+
+            <div class="mb-3">
+                <label for="password" class="form-label">Password</label>
+                <input type="password" name="Password" id="password" class="form-control" placeholder="Enter your password" required />
+            </div>
+         @*    <div class="d-flex justify-content-between align-items-center mb-3">
+                <div class="form-check">
+                    <input type="checkbox" class="form-check-input" id="rememberMe" name="RememberMe" />
+                    <label class="form-check-label" for="rememberMe">Remember Me</label>
+                </div>
+                <a href="@Url.Action("ForgotPassword", "Account")" class="text-decoration-none">Forgot Password?</a>
+            </div> *@
+            <button type="submit" class="btn btn-primary w-100">Login</button>
+
+            <div class="text-center mt-3">
+                <span>Don't have an account? <a href="@Url.Action("Register", "Account")">Register</a></span>
+            </div>
+        </form>
+    </div>
+</div>
+<style>
+    body {
+        background-color: #f8f9fa;
+    }
+    .card {
+        border-radius: 12px;
+    }
+</style>

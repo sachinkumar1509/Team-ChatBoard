@@ -1,0 +1,91 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>@ViewData["Title"] - ChatBoard</title>
+    <link rel="stylesheet" href="~/lib/bootstrap/dist/css/bootstrap.min.css" />
+    <link rel="stylesheet" href="~/css/site.css" asp-append-version="true" />
+    <link rel="stylesheet" href="~/ChatBoard.styles.css" asp-append-version="true" />
+    <style>
+        body, html {
+            height: 100%;
+            margin: 0;
+        }
+
+        main {
+            flex: 1 0 auto;
+            padding: 0;
+        }
+
+        .vh-100-minus-header-footer {
+            height: calc(100vh - 120px);
+        }
+
+        .user-info {
+            display: flex;
+            align-items: center;
+        }
+
+        .user-info img {
+            width: 65px;
+            height: 40px;
+            border-radius: 50%;
+            margin-left: 10px;
+        }
+
+        .user-item {
+            transition: all 0.2s ease-in-out;
+        }
+
+        .user-item:hover {
+            background-color: #007bff !important;
+            color: white !important;
+            transform: translateY(-2px);
+        }
+
+        .user-item.active {
+            background-color: #0056b3 !important;
+            color: white !important;
+        }
+    </style>
+</head>
+<body class="d-flex flex-column">
+    <header>
+        <nav class="navbar navbar-expand-sm navbar-light bg-white border-bottom shadow-sm">
+            <div class="container-fluid">
+                <a class="navbar-brand fw-bold text-primary" asp-controller="Home" asp-action="Index">ChatBoard</a>
+                <div class="d-flex ms-auto user-info">
+                    @if (ViewBag.LoggedInUserName != null)
+                    {
+                        <div class="d-flex ms-auto user-info">
+                            <span class="fw-semibold me-2">@ViewBag.LoggedInUserName</span>
+                            <img src="@ViewBag.LoggedInUserImage" alt="User" />
+                            <a asp-controller="Account" asp-action="Logout" class="btn btn-link text-danger ms-3">Logout</a>
+                        </div>
+                    }
+                    else
+                    {
+                        <div class="d-flex ms-auto">
+                            <a asp-controller="Account" asp-action="Login" class="btn btn-outline-primary me-2">Login</a>
+                            <a asp-controller="Account" asp-action="Register" class="btn btn-primary">Register</a>
+                        </div>
+                    }
+                </div>
+            </div>
+        </nav>
+    </header>
+    <main class="flex-grow-1">
+        @RenderBody()
+    </main>
+    @*  <footer class="border-top footer text-muted text-center py-2" style="line-height:42px">
+        <div class="container">
+            &copy; 2025 - ChatBoard - <a asp-controller="Home" asp-action="Privacy">Privacy</a>
+        </div>
+    </footer> *@
+    <script src="~/lib/jquery/dist/jquery.min.js"></script>
+    <script src="~/lib/bootstrap/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="~/js/site.js" asp-append-version="true"></script>
+    @await RenderSectionAsync("Scripts", required: false)
+</body>
+</html>
